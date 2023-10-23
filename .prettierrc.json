@@ -1,0 +1,13 @@
+{
+  "tabWidth": 4,
+  "singleQuote": true,
+  "plugins": ["@trivago/prettier-plugin-sort-imports"],
+  "overrides": [
+      {
+          "files": ["**/*.yaml"],
+          "options": {
+              "tabWidth": 2
+          }
+      }
+  ]
+}

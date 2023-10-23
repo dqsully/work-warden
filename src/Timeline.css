@@ -1,0 +1,18 @@
+.timeline {
+    position: relative;
+    height: 2em;
+    margin: 1em;
+}
+
+.timeline-line {
+    position: absolute;
+    border: 0.2em solid;
+    border-radius: 0.2em;
+    box-sizing: border-box;
+}
+
+.timeline-now {
+    border-left: 1px dashed;
+    position: absolute;
+    height: 2em;
+}

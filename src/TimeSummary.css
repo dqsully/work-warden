@@ -1,0 +1,11 @@
+.row.time-summary {
+    gap: 0;
+    user-select: none;
+    -moz-user-select: none;
+    -webkit-user-select: none;
+    cursor: default;
+}
+
+.row.time-summary > div {
+    flex: 0 1 10em;
+}
