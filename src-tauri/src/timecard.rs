@@ -31,6 +31,33 @@ impl TrackedTime {
     pub fn active(&self) -> bool {
         self.since.is_some()
     }
+
+    pub fn elapsed_for_date(&self, date: NaiveDate) -> std::time::Duration {
+        let mut elapsed = self.accumulated;
+
+        if let Some(mut since) = self.since {
+            let now = Local::now();
+
+            let day_start = NaiveDateTime::new(date, NaiveTime::MIN)
+                .and_local_timezone(now.timezone())
+                .unwrap();
+            let day_end = NaiveDateTime::new(date + chrono::Days::new(1), NaiveTime::MIN)
+                .and_local_timezone(now.timezone())
+                .unwrap();
+
+            let end = std::cmp::min(now, day_end);
+
+            if since < end {
+                if since < day_start {
+                    since = day_start.fixed_offset();
+                }
+
+                elapsed += (end.fixed_offset() - since).to_std().unwrap();
+            }
+        }
+
+        elapsed
+    }
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -124,17 +151,24 @@ impl EventLog {
                 ClockType::Day => {
                     self.current_state.working.start_at(*time);
 
-                    if self.current_state.active_until.is_none() {
+                    if self.current_state.working.active()
+                        && !self.current_state.on_break.active()
+                        && !self.current_state.on_lunch.active()
+                    {
                         self.current_state.idle_work.start_at(*time);
                     }
                 }
                 ClockType::Break => {
                     self.current_state.on_break.start_at(*time);
+                    self.current_state.working.start_at(*time);
                     self.current_state.on_lunch.end_at(*time);
+                    self.current_state.idle_work.end_at(*time);
                 }
                 ClockType::Lunch => {
                     self.current_state.on_lunch.start_at(*time);
+                    self.current_state.working.start_at(*time);
                     self.current_state.on_break.end_at(*time);
+                    self.current_state.idle_work.end_at(*time);
                 }
             },
             Event::ClockOut { clock, time } => match clock {
@@ -154,7 +188,10 @@ impl EventLog {
             Event::Idle { time } => {
                 self.current_state.active_until = None;
 
-                if self.current_state.working.active() {
+                if self.current_state.working.active()
+                    && !self.current_state.on_break.active()
+                    && !self.current_state.on_lunch.active()
+                {
                     self.current_state.idle_work.start_at(*time);
                 }
             }
@@ -224,6 +261,32 @@ impl EventLog {
 
         Ok(())
     }
+
+    pub fn elapsed(&self) -> ElapsedSummary {
+        ElapsedSummary {
+            work_time: self.current_state.working.elapsed_for_date(self.date),
+            break_time: self.current_state.on_break.elapsed_for_date(self.date),
+            lunch_time: self.current_state.on_lunch.elapsed_for_date(self.date),
+            idle_work_time: self.current_state.idle_work.elapsed_for_date(self.date),
+
+            working: self.current_state.working.active(),
+            on_break: self.current_state.on_break.active(),
+            on_lunch: self.current_state.on_lunch.active(),
+            idle_work: self.current_state.idle_work.active(),
+        }
+    }
+}
+
+pub struct ElapsedSummary {
+    pub work_time: std::time::Duration,
+    pub break_time: std::time::Duration,
+    pub lunch_time: std::time::Duration,
+    pub idle_work_time: std::time::Duration,
+
+    pub working: bool,
+    pub on_break: bool,
+    pub on_lunch: bool,
+    pub idle_work: bool,
 }
 
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]

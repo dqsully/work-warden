@@ -11,10 +11,10 @@ use std::{
 };
 use tauri::{async_runtime, Manager};
 
-pub mod notifications;
-pub mod settings;
-pub mod timecard;
-pub mod wayland;
+mod notifications;
+mod settings;
+mod timecard;
+mod wayland;
 
 struct AppState {
     // data_dir: PathBuf,
@@ -24,6 +24,7 @@ struct AppState {
     event_log: RwLock<timecard::EventLog>,
     settings: Mutex<settings::Settings>,
     app_handle: RwLock<Option<tauri::AppHandle>>,
+    notifier: notifications::Notifier,
 }
 
 impl AppState {
@@ -31,8 +32,38 @@ impl AppState {
         let app_handle = self.app_handle.read().await;
 
         if let Some(app_handle) = &*app_handle {
-            app_handle.emit_all("state", event_log).unwrap();
+            app_handle.emit_all("timecard", event_log).unwrap();
         }
+    }
+
+    async fn update_notifications(&self, event_log: &timecard::EventLog) -> Result<(), Box<dyn Error>> {
+        let elapsed = event_log.elapsed();
+
+        let (work_target, lunch_target, break_target) = {
+            let settings = self.settings.lock().await;
+
+            (settings.work_target, settings.lunch_target, settings.break_target)
+        };
+
+        if elapsed.working && elapsed.work_time - elapsed.lunch_time > work_target {
+            self.notifier.show_overtime(elapsed.work_time - elapsed.lunch_time).await?;
+        } else {
+            self.notifier.clear_overtime().await;
+        }
+
+        if elapsed.on_lunch && elapsed.lunch_time > lunch_target {
+            self.notifier.show_long_lunch(elapsed.lunch_time).await?;
+        } else {
+            self.notifier.clear_long_lunch().await;
+        }
+
+        if elapsed.on_break && elapsed.break_time > break_target {
+            self.notifier.show_long_break(elapsed.break_time).await?;
+        } else {
+            self.notifier.clear_long_break().await;
+        }
+
+        Ok(())
     }
 }
 
@@ -47,6 +78,7 @@ async fn clock_in(
     event_log.save().await.map_err(|err| err.to_string())?;
 
     state.send_event_log(&event_log).await;
+    state.update_notifications(&event_log).await.map_err(|err| err.to_string())?;
 
     Ok(())
 }
@@ -62,6 +94,7 @@ async fn clock_out(
     event_log.save().await.map_err(|err| err.to_string())?;
 
     state.send_event_log(&event_log).await;
+    state.update_notifications(&event_log).await.map_err(|err| err.to_string())?;
 
     Ok(())
 }
@@ -77,6 +110,7 @@ async fn set_tasks(
     event_log.save().await.map_err(|err| err.to_string())?;
 
     state.send_event_log(&event_log).await;
+    state.update_notifications(&event_log).await.map_err(|err| err.to_string())?;
 
     Ok(())
 }
@@ -135,9 +169,15 @@ async fn update_settings(app_state: &AppState) -> Result<(), Box<dyn Error>> {
 }
 
 async fn update_event_log(app_state: &AppState) -> Result<(), Box<dyn Error>> {
-    let mut event_log = app_state.event_log.write().await;
+    {
+        let mut event_log = app_state.event_log.write().await;
 
-    event_log.refresh_active().await
+        event_log.refresh_active().await?;
+
+        app_state.update_notifications(&event_log).await?;
+    }
+
+    Ok(())
 }
 
 fn main() {
@@ -173,6 +213,7 @@ fn main() {
         event_log: RwLock::new(event_log),
         settings: Mutex::new(settings),
         app_handle: RwLock::new(None),
+        notifier: notifications::Notifier::new(),
     });
 
     let app = tauri::Builder::default()

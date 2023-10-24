@@ -14,6 +14,9 @@ pub struct Settings {
     filename: PathBuf,
 
     pub current_date: chrono::NaiveDate,
+    pub work_target: std::time::Duration,
+    pub lunch_target: std::time::Duration,
+    pub break_target: std::time::Duration,
 }
 
 impl Settings {
@@ -32,6 +35,9 @@ impl Settings {
                 filename,
 
                 current_date: Local::now().date_naive(),
+                work_target: std::time::Duration::from_secs(8 * 60 * 60),
+                lunch_target: std::time::Duration::from_secs(60 * 60),
+                break_target: std::time::Duration::from_secs(30 * 60),
             };
 
             settings.save().await?;

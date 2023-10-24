@@ -36,27 +36,23 @@ export function formatMs(ms: number): string {
     }
 
     if (remaining >= msInDay) {
-        const days = Math.floor(remaining / msInDay);
+        output += `${Math.floor(remaining / msInDay)}d`;
         remaining = remaining % msInDay;
-        output += `${days}d`;
     }
 
     if (remaining >= msInHour) {
-        const hours = Math.floor(remaining / msInHour);
+        output += `${Math.floor(remaining / msInHour)}h`;
         remaining = remaining % msInHour;
-        output += `${hours}h`;
     }
 
     if (remaining >= msInMinute) {
-        const minutes = Math.floor(remaining / msInMinute);
+        output += `${Math.floor(remaining / msInMinute)}m`;
         remaining = remaining % msInMinute;
-        output += `${minutes}m`;
     }
 
     if (remaining >= msInSecond) {
-        const seconds = Math.floor(remaining / msInSecond);
+        output += `${Math.floor(remaining / msInSecond)}s`;
         remaining = remaining % msInSecond;
-        output += `${seconds}s`;
     }
 
     return output;

@@ -48,10 +48,8 @@ interface NowProps {
     left: number;
 }
 
-function Now({left}: NowProps) {
-    return (
-        <div className="timeline-now" style={{left: toPercent(left)}} />
-    )
+function Now({ left }: NowProps) {
+    return <div className="timeline-now" style={{ left: toPercent(left) }} />;
 }
 
 export interface TimelineProps {
@@ -103,6 +101,7 @@ const Timeline = memo(function Timeline({ timecard, partial }: TimelineProps) {
                     ? dayStart
                     : null,
         };
+        let idling = timecard.initialState.activeUntil === null; // TODO: crash detection
 
         function start(type: RowName, time: number) {
             since[type] = since[type] || time;
@@ -148,11 +147,13 @@ const Timeline = memo(function Timeline({ timecard, partial }: TimelineProps) {
                         }
                         case 'Break': {
                             start('break', time);
+                            start('work', time);
                             stop('lunch', time);
                             break;
                         }
                         case 'Lunch': {
                             start('lunch', time);
+                            start('work', time);
                             stop('break', time);
                             break;
                         }
@@ -187,20 +188,26 @@ const Timeline = memo(function Timeline({ timecard, partial }: TimelineProps) {
                     break;
                 }
                 case 'Active': {
-                    if (since.work === null) {
-                        start('activeNotWork', time);
-                    } else {
-                        stop('idleWork', time);
-                    }
+                    idling = false;
                     break;
                 }
                 case 'Idle': {
-                    if (since.work !== null) {
-                        start('idleWork', time);
-                    } else {
-                        stop('activeNotWork', time);
-                    }
+                    idling = true;
                     break;
+                }
+            }
+
+            if (since.work === null) {
+                if (idling) {
+                    start('activeNotWork', time);
+                } else {
+                    stop('activeNotWork', time);
+                }
+            } else {
+                if (idling && since.break === null && since.lunch === null) {
+                    start('idleWork', time);
+                } else {
+                    stop('idleWork', time);
                 }
             }
         }
@@ -214,12 +221,8 @@ const Timeline = memo(function Timeline({ timecard, partial }: TimelineProps) {
             stop('activeNotWork', now);
             stop('idleWork', now);
 
-            lines.push(
-                <Now
-                    key="now"
-                    left={(now - dayStart) / msInDay}
-                />
-            );
+            // TODO: account for daylight savings by using Date() to count msInDay instead of assuming
+            lines.push(<Now key="now" left={(now - dayStart) / msInDay} />);
         }
     }
 

@@ -55,7 +55,7 @@ Tasks:
 [X] UI with time tracking
 [X] Track idle time
 [X] Refresh timecards after day boundary
-[ ] Notifications (overtime work, long lunch [until over], long break [until over])
+[X] Notifications (overtime work, long lunch [until over], long break [until over])
 [ ] Tasks list with starred and last-used metrics
 [ ] Shortcut integration (API key, filters)
 [ ] Settings page (Shortcut API key, force sync)
