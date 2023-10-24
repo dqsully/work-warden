@@ -1,10 +1,9 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     error::Error,
-    ffi::OsString,
 };
 
-use async_std::fs::File;
+use async_std::{fs::File, path::PathBuf};
 use async_std::prelude::*;
 use chrono::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -78,8 +77,8 @@ pub struct State {
 
     #[serde(rename = "idleWork")]
     idle_work: TrackedTime,
-    #[serde(rename = "isIdle")]
-    is_idle: bool,
+    #[serde(rename = "activeUntil")]
+    active_until: Option<chrono::DateTime<FixedOffset>>,
 
     tasks: TrackedMultiTime<TaskID>,
 }
@@ -93,11 +92,11 @@ pub struct EventLog {
     events: BTreeSet<Event>,
 
     #[serde(skip)]
-    filename: OsString,
+    filename: PathBuf,
 }
 
 impl EventLog {
-    pub fn new(filename: OsString, initial_state: State) -> EventLog {
+    pub fn new(filename: PathBuf, initial_state: State) -> EventLog {
         EventLog {
             current_state: initial_state.clone(),
             initial_state,
@@ -112,7 +111,7 @@ impl EventLog {
                 ClockType::Day => {
                     self.current_state.working.start_at(*time);
 
-                    if self.current_state.is_idle {
+                    if self.current_state.active_until.is_none() {
                         self.current_state.idle_work.start_at(*time);
                     }
                 },
@@ -136,11 +135,11 @@ impl EventLog {
                 ClockType::Lunch => self.current_state.on_lunch.end_at(*time),
             },
             Event::Active { time } => {
-                self.current_state.is_idle = false;
+                self.current_state.active_until = Some(*time);
                 self.current_state.idle_work.end_at(*time);
             },
             Event::Idle { time } => {
-                self.current_state.is_idle = true;
+                self.current_state.active_until = None;
 
                 if self.current_state.working.active() {
                     self.current_state.idle_work.start_at(*time);
@@ -153,15 +152,15 @@ impl EventLog {
     }
 
     pub async fn save(&self) -> Result<(), Box<dyn Error>> {
-        let json = serde_json::to_string(self)?;
+        let json = serde_json::to_vec(self)?;
 
         let mut file = File::create(&self.filename).await?;
-        file.write_all(json.as_bytes()).await?;
+        file.write_all(&json).await?;
 
         Ok(())
     }
 
-    pub async fn load(filename: OsString) -> Result<EventLog, Box<dyn Error>> {
+    pub async fn load(filename: PathBuf) -> Result<EventLog, Box<dyn Error>> {
         let mut file = File::open(&filename).await?;
 
         let mut buf = Vec::new();
@@ -174,6 +173,39 @@ impl EventLog {
 
     pub fn get_state(&self) -> State {
         self.current_state.clone()
+    }
+
+    pub async fn force_active(&mut self) -> Result<(), Box<dyn Error>> {
+        println!("forcing active");
+
+        let now = Local::now().fixed_offset();
+
+        match &self.current_state.active_until {
+            Some(active_until) => {
+                // App was closed or something, add idle event from last known
+                // active time
+                if now - active_until > chrono::Duration::minutes(5) {
+                    println!("was last active >5m ago, injecting idle event");
+                    self.add_event(Event::Idle { time: *active_until });
+                    self.add_event(Event::Active { time: now });
+                }
+            },
+            None => self.add_event(Event::Active { time: now }),
+        }
+
+        self.current_state.active_until = Some(now);
+        self.save().await?;
+
+        Ok(())
+    }
+
+    pub async fn refresh_active(&mut self) -> Result<(), Box<dyn Error>> {
+        if self.current_state.active_until.is_some() {
+            self.current_state.active_until = Some(Local::now().fixed_offset());
+            self.save().await?;
+        }
+
+        Ok(())
     }
 }
 

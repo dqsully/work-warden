@@ -12,7 +12,7 @@ const zeroTimecardState: TimecardState = {
     working: zeroTrackedTime,
     onBreak: zeroTrackedTime,
     onLunch: zeroTrackedTime,
-    isIdle: false,
+    activeUntil: null,
     idleWork: zeroTrackedTime,
     tasks: zeroTrackedMultiTime,
 };

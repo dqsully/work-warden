@@ -93,12 +93,12 @@ const Timeline = memo(function Timeline({ timecard, partial }: TimelineProps) {
             lunch:
                 timecard.initialState.onLunch.since === null ? null : dayStart,
             idleWork:
-                timecard.initialState.isIdle &&
+                timecard.initialState.activeUntil === null &&
                 timecard.initialState.working.since !== null
                     ? dayStart
                     : null,
             activeNotWork:
-                !timecard.initialState.isIdle &&
+                timecard.initialState.activeUntil !== null &&
                 timecard.initialState.working.since === null
                     ? dayStart
                     : null,

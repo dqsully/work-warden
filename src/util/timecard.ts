@@ -27,7 +27,7 @@ export interface RawTimecardState {
     onBreak: RawTrackedTime;
     onLunch: RawTrackedTime;
     idleWork: RawTrackedTime;
-    isIdle: boolean;
+    activeUntil: string | null;
     tasks: RawTrackedMultiTime;
 }
 
@@ -36,7 +36,7 @@ export interface TimecardState {
     onBreak: TrackedTime;
     onLunch: TrackedTime;
     idleWork: TrackedTime;
-    isIdle: boolean;
+    activeUntil: Date | null;
     tasks: TrackedMultiTime;
 }
 
@@ -135,7 +135,7 @@ export function parseTimecardState(raw: RawTimecardState): TimecardState {
         working: parseTrackedTime(raw.working),
         onBreak: parseTrackedTime(raw.onBreak),
         onLunch: parseTrackedTime(raw.onLunch),
-        isIdle: raw.isIdle,
+        activeUntil: raw.activeUntil === null ? null : new Date(raw.activeUntil),
         idleWork: parseTrackedTime(raw.idleWork),
         tasks: parseTrackedMultiTime(raw.tasks),
     }
