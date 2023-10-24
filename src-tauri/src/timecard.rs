@@ -3,8 +3,8 @@ use std::{
     error::Error,
 };
 
-use async_std::{fs::File, path::PathBuf};
 use async_std::prelude::*;
+use async_std::{fs::File, path::PathBuf};
 use chrono::prelude::*;
 use serde::{Deserialize, Serialize};
 
@@ -49,13 +49,14 @@ impl<T: Ord> Default for TrackedMultiTime<T> {
 }
 
 impl<T: Ord> TrackedMultiTime<T> {
-    pub fn set_tracked(&mut self, time: chrono::DateTime<FixedOffset>, ids: BTreeSet<T>)
-    {
+    pub fn set_tracked(&mut self, time: chrono::DateTime<FixedOffset>, ids: BTreeSet<T>) {
         if let Some((start, past_ids)) = self.since.take() {
-            let per_id_time = (time - start).to_std().unwrap_or(std::time::Duration::ZERO) / (past_ids.len() as u32);
+            let per_id_time = (time - start).to_std().unwrap_or(std::time::Duration::ZERO)
+                / (past_ids.len() as u32);
 
             for past_id in past_ids {
-                self.accumulated.entry(past_id)
+                self.accumulated
+                    .entry(past_id)
                     .and_modify(|d| *d += per_id_time)
                     .or_insert(per_id_time);
             }
@@ -126,15 +127,15 @@ impl EventLog {
                     if self.current_state.active_until.is_none() {
                         self.current_state.idle_work.start_at(*time);
                     }
-                },
+                }
                 ClockType::Break => {
                     self.current_state.on_break.start_at(*time);
                     self.current_state.on_lunch.end_at(*time);
-                },
+                }
                 ClockType::Lunch => {
                     self.current_state.on_lunch.start_at(*time);
                     self.current_state.on_break.end_at(*time);
-                },
+                }
             },
             Event::ClockOut { clock, time } => match clock {
                 ClockType::Day => {
@@ -142,22 +143,24 @@ impl EventLog {
                     self.current_state.on_break.end_at(*time);
                     self.current_state.on_lunch.end_at(*time);
                     self.current_state.idle_work.end_at(*time);
-                },
+                }
                 ClockType::Break => self.current_state.on_break.end_at(*time),
                 ClockType::Lunch => self.current_state.on_lunch.end_at(*time),
             },
             Event::Active { time } => {
                 self.current_state.active_until = Some(*time);
                 self.current_state.idle_work.end_at(*time);
-            },
+            }
             Event::Idle { time } => {
                 self.current_state.active_until = None;
 
                 if self.current_state.working.active() {
                     self.current_state.idle_work.start_at(*time);
                 }
-            },
-            Event::Tasks { tasks, time } => self.current_state.tasks.set_tracked(*time, tasks.clone()),
+            }
+            Event::Tasks { tasks, time } => {
+                self.current_state.tasks.set_tracked(*time, tasks.clone())
+            }
         }
 
         self.events.insert(event);
@@ -198,10 +201,12 @@ impl EventLog {
                 // active time
                 if now - active_until > chrono::Duration::minutes(5) {
                     println!("was last active >5m ago, injecting idle event");
-                    self.add_event(Event::Idle { time: *active_until });
+                    self.add_event(Event::Idle {
+                        time: *active_until,
+                    });
                     self.add_event(Event::Active { time: now });
                 }
-            },
+            }
             None => self.add_event(Event::Active { time: now }),
         }
 

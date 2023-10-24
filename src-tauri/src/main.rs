@@ -11,6 +11,7 @@ use std::{
 };
 use tauri::{async_runtime, Manager};
 
+pub mod notifications;
 pub mod settings;
 pub mod timecard;
 pub mod wayland;
@@ -20,7 +21,6 @@ struct AppState {
     // app_dir: PathBuf,
     logs_dir: PathBuf,
     // config_file: PathBuf,
-
     event_log: RwLock<timecard::EventLog>,
     settings: Mutex<settings::Settings>,
     app_handle: RwLock<Option<tauri::AppHandle>>,
@@ -82,7 +82,9 @@ async fn set_tasks(
 }
 
 #[tauri::command]
-async fn get_current_timecard(state: tauri::State<'_, Arc<AppState>>) -> Result<timecard::EventLog, ()> {
+async fn get_current_timecard(
+    state: tauri::State<'_, Arc<AppState>>,
+) -> Result<timecard::EventLog, ()> {
     let event_log = state.event_log.read().await;
     Ok(event_log.clone())
 }
@@ -159,15 +161,15 @@ fn main() {
 
     async_runtime::block_on(event_log.force_active()).expect("error activating event log");
 
-    let settings = async_runtime::block_on(settings::Settings::load_or_new(config_file.clone().into()))
-        .expect("error loading/initializing settings");
+    let settings =
+        async_runtime::block_on(settings::Settings::load_or_new(config_file.clone().into()))
+            .expect("error loading/initializing settings");
 
     let app_state = Arc::new(AppState {
         // data_dir,
         // app_dir,
         logs_dir,
         // config_file,
-
         event_log: RwLock::new(event_log),
         settings: Mutex::new(settings),
         app_handle: RwLock::new(None),
@@ -176,7 +178,10 @@ fn main() {
     let app = tauri::Builder::default()
         .manage(app_state.clone())
         .invoke_handler(tauri::generate_handler![
-            clock_in, clock_out, set_tasks, get_current_timecard
+            clock_in,
+            clock_out,
+            set_tasks,
+            get_current_timecard
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

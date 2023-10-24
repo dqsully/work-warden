@@ -1,8 +1,12 @@
 use std::error::Error;
 
-use async_std::{path::PathBuf, fs::File, io::{ReadExt, WriteExt}};
+use async_std::{
+    fs::File,
+    io::{ReadExt, WriteExt},
+    path::PathBuf,
+};
 use chrono::prelude::*;
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize)]
 pub struct Settings {
