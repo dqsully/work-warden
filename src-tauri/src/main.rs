@@ -9,7 +9,7 @@ use std::{
     path::{Path, PathBuf},
     sync::Arc,
 };
-use tauri::async_runtime;
+use tauri::{async_runtime, Manager};
 
 pub mod settings;
 pub mod timecard;
@@ -26,47 +26,63 @@ struct AppState {
     app_handle: RwLock<Option<tauri::AppHandle>>,
 }
 
+impl AppState {
+    async fn send_event_log(&self, event_log: &timecard::EventLog) {
+        let app_handle = self.app_handle.read().await;
+
+        if let Some(app_handle) = &*app_handle {
+            app_handle.emit_all("state", event_log).unwrap();
+        }
+    }
+}
+
 #[tauri::command]
 async fn clock_in(
     clock: timecard::ClockType,
     state: tauri::State<'_, Arc<AppState>>,
-) -> Result<timecard::EventLog, String> {
+) -> Result<(), String> {
     let mut event_log = state.event_log.write().await;
 
     event_log.add_event(timecard::Event::clock_in(clock));
     event_log.save().await.map_err(|err| err.to_string())?;
 
-    Ok(event_log.clone())
+    state.send_event_log(&event_log).await;
+
+    Ok(())
 }
 
 #[tauri::command]
 async fn clock_out(
     clock: timecard::ClockType,
     state: tauri::State<'_, Arc<AppState>>,
-) -> Result<timecard::EventLog, String> {
+) -> Result<(), String> {
     let mut event_log = state.event_log.write().await;
 
     event_log.add_event(timecard::Event::clock_out(clock));
     event_log.save().await.map_err(|err| err.to_string())?;
 
-    Ok(event_log.clone())
+    state.send_event_log(&event_log).await;
+
+    Ok(())
 }
 
 #[tauri::command]
 async fn set_tasks(
     tasks: BTreeSet<timecard::TaskID>,
     state: tauri::State<'_, Arc<AppState>>,
-) -> Result<timecard::EventLog, String> {
+) -> Result<(), String> {
     let mut event_log = state.event_log.write().await;
 
     event_log.add_event(timecard::Event::tasks(tasks));
     event_log.save().await.map_err(|err| err.to_string())?;
 
-    Ok(event_log.clone())
+    state.send_event_log(&event_log).await;
+
+    Ok(())
 }
 
 #[tauri::command]
-async fn get_state(state: tauri::State<'_, Arc<AppState>>) -> Result<timecard::EventLog, ()> {
+async fn get_current_timecard(state: tauri::State<'_, Arc<AppState>>) -> Result<timecard::EventLog, ()> {
     let event_log = state.event_log.read().await;
     Ok(event_log.clone())
 }
@@ -96,15 +112,21 @@ async fn update_settings(app_state: &AppState) -> Result<(), Box<dyn Error>> {
     if settings.current_date != current_date {
         let mut event_log = app_state.event_log.write().await;
 
+        let mut new_state = event_log.get_state();
+        new_state.reset_accumulations();
+
         let new_event_log = timecard::EventLog::new(
             log_file_for_date(&app_state.logs_dir, current_date).into(),
-            event_log.get_state(),
+            current_date,
+            new_state,
         );
         new_event_log.save().await?;
         *event_log = new_event_log;
 
         settings.current_date = current_date;
         settings.save().await?;
+
+        app_state.send_event_log(&event_log).await;
     }
 
     Ok(())
@@ -132,7 +154,7 @@ fn main() {
         async_runtime::block_on(timecard::EventLog::load(log_file.into()))
             .expect("couldn't load initial time card")
     } else {
-        timecard::EventLog::new(log_file.into(), timecard::State::default())
+        timecard::EventLog::new(log_file.into(), current_date, timecard::State::default())
     };
 
     async_runtime::block_on(event_log.force_active()).expect("error activating event log");
@@ -154,7 +176,7 @@ fn main() {
     let app = tauri::Builder::default()
         .manage(app_state.clone())
         .invoke_handler(tauri::generate_handler![
-            clock_in, clock_out, set_tasks, get_state
+            clock_in, clock_out, set_tasks, get_current_timecard
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
@@ -178,6 +200,8 @@ fn main() {
                 event_log.add_event(timecard::Event::active());
                 println!("active");
             }
+
+            app_state.send_event_log(&event_log).await;
         });
     });
 

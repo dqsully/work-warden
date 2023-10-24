@@ -83,6 +83,15 @@ pub struct State {
     tasks: TrackedMultiTime<TaskID>,
 }
 
+impl State {
+    pub fn reset_accumulations(&mut self) {
+        self.working.accumulated = std::time::Duration::ZERO;
+        self.on_break.accumulated = std::time::Duration::ZERO;
+        self.on_lunch.accumulated = std::time::Duration::ZERO;
+        self.idle_work.accumulated = std::time::Duration::ZERO;
+    }
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 pub struct EventLog {
     #[serde(rename = "initialState")]
@@ -91,16 +100,19 @@ pub struct EventLog {
     current_state: State,
     events: BTreeSet<Event>,
 
+    date: NaiveDate,
+
     #[serde(skip)]
     filename: PathBuf,
 }
 
 impl EventLog {
-    pub fn new(filename: PathBuf, initial_state: State) -> EventLog {
+    pub fn new(filename: PathBuf, date: NaiveDate, initial_state: State) -> EventLog {
         EventLog {
             current_state: initial_state.clone(),
             initial_state,
             events: BTreeSet::new(),
+            date,
             filename,
         }
     }

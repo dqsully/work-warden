@@ -4,27 +4,26 @@ import { clockIn, clockOut } from "./api";
 
 export interface TimeButtonsProps {
     timecard: Timecard;
-    setTimecard(state: Timecard): void;
 }
 
-function TimeButtons({timecard, setTimecard}: TimeButtonsProps) {
-    const clockInDay = useCallback(async () => {
-        setTimecard(await clockIn('Day'));
+function TimeButtons({timecard}: TimeButtonsProps) {
+    const clockInDay = useCallback(() => {
+        clockIn('Day').catch(console.error);
     }, []);
-    const startBreak = useCallback(async () => {
-        setTimecard(await clockIn('Break'));
+    const startBreak = useCallback(() => {
+        clockIn('Break').catch(console.error);
     }, []);
-    const startLunch = useCallback(async () => {
-        setTimecard(await clockIn('Lunch'));
+    const startLunch = useCallback(() => {
+        clockIn('Lunch').catch(console.error);
     }, []);
-    const clockOutDay = useCallback(async () => {
-        setTimecard(await clockOut('Day'));
+    const clockOutDay = useCallback(() => {
+        clockOut('Day').catch(console.error);
     }, []);
-    const endBreak = useCallback(async () => {
-        setTimecard(await clockOut('Break'));
+    const endBreak = useCallback(() => {
+        clockOut('Break').catch(console.error);
     }, []);
-    const endLunch = useCallback(async () => {
-        setTimecard(await clockOut('Lunch'));
+    const endLunch = useCallback(() => {
+        clockOut('Lunch').catch(console.error);
     }, []);
 
     return (
