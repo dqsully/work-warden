@@ -199,9 +199,9 @@ const Timeline = memo(function Timeline({ timecard, partial }: TimelineProps) {
 
             if (since.work === null) {
                 if (idling) {
-                    start('activeNotWork', time);
-                } else {
                     stop('activeNotWork', time);
+                } else {
+                    start('activeNotWork', time);
                 }
             } else {
                 if (idling && since.break === null && since.lunch === null) {
