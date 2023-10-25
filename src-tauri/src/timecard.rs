@@ -148,7 +148,7 @@ impl EventLog {
                 ClockType::Day => {
                     self.current_state.working.start_at(*time);
 
-                    if self.current_state.working.active()
+                    if self.current_state.active_until.is_none()
                         && !self.current_state.on_break.active()
                         && !self.current_state.on_lunch.active()
                     {
