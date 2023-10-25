@@ -56,7 +56,20 @@ Tasks:
 [X] Track idle time
 [X] Refresh timecards after day boundary
 [X] Notifications (overtime work, long lunch [until over], long break [until over])
+[X] Fix date refreshes
 [ ] Tasks list with starred and last-used metrics
+    [ ] Backend
+        [X] Load/save tasks and recents
+        [ ] Disable task accumulation during breaks and lunch
+        [ ] Autoincrement ID
+        [ ] Create task
+    [ ] Frontend
+        [ ] Tasks list
+        [ ] Create task
+        [ ] Log to task
+        [ ] Log to multiple tasks
+        [ ] Update task
+        [ ] Log to new task (create empty, start logging, show update page)
 [ ] Shortcut integration (API key, filters)
 [ ] Settings page (Shortcut API key, force sync)
 [ ] Garmin Connect integration (API key, settings)

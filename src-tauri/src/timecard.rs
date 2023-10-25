@@ -3,6 +3,7 @@ use std::{
     error::Error,
 };
 
+use crate::tasks::TaskID;
 use async_std::prelude::*;
 use async_std::{fs::File, path::PathBuf};
 use chrono::prelude::*;
@@ -96,16 +97,13 @@ impl<T: Ord> TrackedMultiTime<T> {
 }
 
 #[derive(Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
 pub struct State {
     working: TrackedTime,
-    #[serde(rename = "onBreak")]
     on_break: TrackedTime,
-    #[serde(rename = "onLunch")]
     on_lunch: TrackedTime,
 
-    #[serde(rename = "idleWork")]
     idle_work: TrackedTime,
-    #[serde(rename = "activeUntil")]
     active_until: Option<chrono::DateTime<FixedOffset>>,
 
     tasks: TrackedMultiTime<TaskID>,
@@ -121,10 +119,9 @@ impl State {
 }
 
 #[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct EventLog {
-    #[serde(rename = "initialState")]
     initial_state: State,
-    #[serde(rename = "currentState")]
     current_state: State,
     events: BTreeSet<Event>,
 
@@ -227,30 +224,33 @@ impl EventLog {
         self.current_state.clone()
     }
 
-    pub async fn force_active(&mut self) -> Result<(), Box<dyn Error>> {
-        println!("forcing active");
-
+    pub fn infer_idle(&mut self) -> bool {
         let now = Local::now().fixed_offset();
 
-        match &self.current_state.active_until {
-            Some(active_until) => {
-                // App was closed or something, add idle event from last known
-                // active time
-                if now - active_until > chrono::Duration::minutes(5) {
-                    println!("was last active >5m ago, injecting idle event");
-                    self.add_event(Event::Idle {
-                        time: *active_until,
-                    });
-                    self.add_event(Event::Active { time: now });
-                }
+        if let Some(active_until) = &self.current_state.active_until {
+            // App was closed or something, add an idle event from last known active time
+            if now - active_until > chrono::Duration::minutes(5) {
+                println!("was last active >5m ago, injecting idle event");
+                self.add_event(Event::Idle {
+                    time: *active_until,
+                });
+                self.current_state.active_until = None;
             }
-            None => self.add_event(Event::Active { time: now }),
+
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn force_active(&mut self) {
+        let now = Local::now().fixed_offset();
+
+        if self.current_state.active_until.is_none() {
+            self.add_event(Event::Active { time: now });
         }
 
         self.current_state.active_until = Some(now);
-        self.save().await?;
-
-        Ok(())
     }
 
     pub async fn refresh_active(&mut self) -> Result<(), Box<dyn Error>> {
@@ -428,16 +428,4 @@ pub enum ClockType {
     Day,
     Break,
     Lunch,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub struct TaskID(u64);
-
-#[derive(PartialEq, Eq, Serialize, Deserialize)]
-pub struct Task {
-    id: TaskID,
-    #[serde(rename = "shortcutID")]
-    shortcut_id: Option<u64>,
-    title: String,
-    description: String,
 }

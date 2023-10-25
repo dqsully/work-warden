@@ -13,6 +13,7 @@ use tauri::{async_runtime, Manager};
 
 mod notifications;
 mod settings;
+mod tasks;
 mod timecard;
 mod wayland;
 
@@ -25,6 +26,7 @@ struct AppState {
     settings: Mutex<settings::Settings>,
     app_handle: RwLock<Option<tauri::AppHandle>>,
     notifier: notifications::Notifier,
+    task_manager: tasks::TaskManager,
 }
 
 impl AppState {
@@ -36,34 +38,91 @@ impl AppState {
         }
     }
 
-    async fn update_notifications(&self, event_log: &timecard::EventLog) -> Result<(), Box<dyn Error>> {
+    async fn update_notifications(
+        &self,
+        event_log: &timecard::EventLog,
+    ) -> Result<(), Box<dyn Error>> {
         let elapsed = event_log.elapsed();
 
         let (work_target, lunch_target, break_target) = {
             let settings = self.settings.lock().await;
 
-            (settings.work_target, settings.lunch_target, settings.break_target)
+            (
+                settings.work_target,
+                settings.lunch_target,
+                settings.break_target,
+            )
         };
 
         if elapsed.working && elapsed.work_time - elapsed.lunch_time > work_target {
-            self.notifier.show_overtime(elapsed.work_time - elapsed.lunch_time).await?;
+            self.notifier
+                .show_overtime(elapsed.work_time - elapsed.lunch_time - work_target)
+                .await?;
         } else {
             self.notifier.clear_overtime().await;
         }
 
         if elapsed.on_lunch && elapsed.lunch_time > lunch_target {
-            self.notifier.show_long_lunch(elapsed.lunch_time).await?;
+            self.notifier
+                .show_long_lunch(elapsed.lunch_time - lunch_target)
+                .await?;
         } else {
             self.notifier.clear_long_lunch().await;
         }
 
         if elapsed.on_break && elapsed.break_time > break_target {
-            self.notifier.show_long_break(elapsed.break_time).await?;
+            self.notifier
+                .show_long_break(elapsed.break_time - break_target)
+                .await?;
         } else {
             self.notifier.clear_long_break().await;
         }
 
         Ok(())
+    }
+
+    async fn refresh_date(&self, send: bool, renew_active: bool) -> Result<bool, Box<dyn Error>> {
+        let mut settings = self.settings.lock().await;
+        let mut event_log = self.event_log.write().await;
+        let current_date = Local::now().date_naive();
+
+        // Add idle event if needed
+        let injected_idle = event_log.infer_idle();
+
+        if settings.current_date != current_date {
+            // Save changes to old event log before we create a new one
+            if injected_idle {
+                event_log.save().await?;
+            }
+
+            // Create new event log
+            let mut new_state = event_log.get_state();
+            new_state.reset_accumulations();
+
+            let new_event_log = timecard::EventLog::new(
+                log_file_for_date(&self.logs_dir, current_date).into(),
+                current_date,
+                new_state,
+            );
+            new_event_log.save().await?;
+            *event_log = new_event_log;
+
+            // Update current date in settings
+            settings.current_date = current_date;
+            settings.save().await?;
+
+            // Send new event log to frontend
+            if send {
+                self.send_event_log(&event_log).await;
+            }
+        }
+
+        // Inject new active event
+        if renew_active && injected_idle {
+            event_log.refresh_active().await?;
+        }
+
+        Ok(injected_idle)
     }
 }
 
@@ -72,13 +131,21 @@ async fn clock_in(
     clock: timecard::ClockType,
     state: tauri::State<'_, Arc<AppState>>,
 ) -> Result<(), String> {
+    state
+        .refresh_date(false, true)
+        .await
+        .map_err(|err| err.to_string())?;
+
     let mut event_log = state.event_log.write().await;
 
     event_log.add_event(timecard::Event::clock_in(clock));
     event_log.save().await.map_err(|err| err.to_string())?;
 
     state.send_event_log(&event_log).await;
-    state.update_notifications(&event_log).await.map_err(|err| err.to_string())?;
+    state
+        .update_notifications(&event_log)
+        .await
+        .map_err(|err| err.to_string())?;
 
     Ok(())
 }
@@ -88,29 +155,45 @@ async fn clock_out(
     clock: timecard::ClockType,
     state: tauri::State<'_, Arc<AppState>>,
 ) -> Result<(), String> {
+    state
+        .refresh_date(false, true)
+        .await
+        .map_err(|err| err.to_string())?;
+
     let mut event_log = state.event_log.write().await;
 
     event_log.add_event(timecard::Event::clock_out(clock));
     event_log.save().await.map_err(|err| err.to_string())?;
 
     state.send_event_log(&event_log).await;
-    state.update_notifications(&event_log).await.map_err(|err| err.to_string())?;
+    state
+        .update_notifications(&event_log)
+        .await
+        .map_err(|err| err.to_string())?;
 
     Ok(())
 }
 
 #[tauri::command]
 async fn set_tasks(
-    tasks: BTreeSet<timecard::TaskID>,
+    tasks: BTreeSet<tasks::TaskID>,
     state: tauri::State<'_, Arc<AppState>>,
 ) -> Result<(), String> {
+    state
+        .refresh_date(false, true)
+        .await
+        .map_err(|err| err.to_string())?;
+
     let mut event_log = state.event_log.write().await;
 
     event_log.add_event(timecard::Event::tasks(tasks));
     event_log.save().await.map_err(|err| err.to_string())?;
 
     state.send_event_log(&event_log).await;
-    state.update_notifications(&event_log).await.map_err(|err| err.to_string())?;
+    state
+        .update_notifications(&event_log)
+        .await
+        .map_err(|err| err.to_string())?;
 
     Ok(())
 }
@@ -129,50 +212,21 @@ async fn background_loop(app_state: Arc<AppState>) {
     loop {
         let start = std::time::Instant::now();
 
-        update_settings(&app_state)
-            .await
-            .unwrap_or_else(|e| println!("error updating settings: {}", e));
-        update_event_log(&app_state)
-            .await
-            .unwrap_or_else(|e| println!("error updating event log: {}", e));
+        if let Err(e) = app_state.refresh_date(true, false).await {
+            println!("error updating settings: {}", e)
+        }
+
+        if let Err(e) = update_event_log(&app_state).await {
+            println!("error updating event log: {}", e);
+        }
 
         async_std::task::sleep(loop_time - start.elapsed()).await;
     }
 }
 
-async fn update_settings(app_state: &AppState) -> Result<(), Box<dyn Error>> {
-    let mut settings = app_state.settings.lock().await;
-
-    let current_date = Local::now().date_naive();
-
-    if settings.current_date != current_date {
-        let mut event_log = app_state.event_log.write().await;
-
-        let mut new_state = event_log.get_state();
-        new_state.reset_accumulations();
-
-        let new_event_log = timecard::EventLog::new(
-            log_file_for_date(&app_state.logs_dir, current_date).into(),
-            current_date,
-            new_state,
-        );
-        new_event_log.save().await?;
-        *event_log = new_event_log;
-
-        settings.current_date = current_date;
-        settings.save().await?;
-
-        app_state.send_event_log(&event_log).await;
-    }
-
-    Ok(())
-}
-
 async fn update_event_log(app_state: &AppState) -> Result<(), Box<dyn Error>> {
     {
-        let mut event_log = app_state.event_log.write().await;
-
-        event_log.refresh_active().await?;
+        let event_log = app_state.event_log.read().await;
 
         app_state.update_notifications(&event_log).await?;
     }
@@ -184,6 +238,7 @@ fn main() {
     let data_dir = dirs::data_dir().expect("could not find user data directory");
     let app_dir = data_dir.join("work-warden");
     let logs_dir = app_dir.join("logs");
+    let tasks_dir = app_dir.join("tasks");
     let config_file = app_dir.join("config.json");
 
     std::fs::create_dir_all(&app_dir).expect("could not create app directory");
@@ -192,28 +247,46 @@ fn main() {
     let current_date = Local::now().date_naive();
     let log_file = log_file_for_date(&logs_dir, current_date);
 
-    let mut event_log = if log_file.exists() {
+    let event_log = if log_file.exists() {
         async_runtime::block_on(timecard::EventLog::load(log_file.into()))
             .expect("couldn't load initial time card")
     } else {
         timecard::EventLog::new(log_file.into(), current_date, timecard::State::default())
     };
 
-    async_runtime::block_on(event_log.force_active()).expect("error activating event log");
-
     let settings =
         async_runtime::block_on(settings::Settings::load_or_new(config_file.clone().into()))
             .expect("error loading/initializing settings");
+
+    let task_manager =
+        async_runtime::block_on(tasks::TaskManager::load_or_new(tasks_dir.clone().into()))
+            .expect("error loading/initializing tasks");
 
     let app_state = Arc::new(AppState {
         // data_dir,
         // app_dir,
         logs_dir,
+        // tasks_dir,
         // config_file,
         event_log: RwLock::new(event_log),
         settings: Mutex::new(settings),
         app_handle: RwLock::new(None),
         notifier: notifications::Notifier::new(),
+        task_manager,
+    });
+
+    async_runtime::block_on(async {
+        app_state
+            .refresh_date(false, false)
+            .await
+            .expect("error refreshing event log");
+
+        let mut event_log = app_state.event_log.write().await;
+        event_log.force_active();
+        event_log
+            .save()
+            .await
+            .expect("error refreshing event log active")
     });
 
     let app = tauri::Builder::default()
@@ -236,19 +309,30 @@ fn main() {
     async_runtime::spawn(background_loop(app_state_background));
 
     wayland::listen_idle(move |idle| {
-        async_runtime::block_on(async {
+        let result = async_runtime::block_on(async {
+            let injected_idle = app_state.refresh_date(false, !idle).await?;
+
             let mut event_log = app_state.event_log.write().await;
 
             if idle {
-                event_log.add_event(timecard::Event::idle());
-                println!("idle");
+                if !injected_idle {
+                    event_log.add_event(timecard::Event::idle());
+                    println!("idle");
+                }
             } else {
                 event_log.add_event(timecard::Event::active());
                 println!("active");
             }
 
+            event_log.save().await?;
             app_state.send_event_log(&event_log).await;
+
+            Ok::<(), Box<dyn Error>>(())
         });
+
+        if let Err(err) = result {
+            println!("error handling idle update: {}", err);
+        }
     });
 
     app.run(|_, _| {});
