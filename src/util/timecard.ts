@@ -9,16 +9,19 @@ export interface RawTrackedTime {
 
 export interface TrackedTime {
     since: Date | null;
+    divider?: number;
     accumulated: number;
 }
 
 export interface RawTrackedMultiTime {
-    since: [string, number[]] | null;
+    since: string | null;
+    ids: number[];
     accumulated: Record<number, Duration>;
 }
 
 export interface TrackedMultiTime {
-    since: [Date, number[]] | null;
+    since: Date | null;
+    ids: number[];
     accumulated: Record<number, number>;
 }
 
@@ -156,7 +159,8 @@ export function parseTrackedMultiTime(raw: RawTrackedMultiTime): TrackedMultiTim
     }
 
     return {
-        since: raw.since === null ? null : [new Date(raw.since[0]), raw.since[1]],
+        since: raw.since === null ? null : new Date(raw.since),
+        ids: raw.ids,
         accumulated,
     }
 }

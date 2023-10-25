@@ -63,7 +63,8 @@ impl TrackedTime {
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct TrackedMultiTime<T: Ord> {
-    since: Option<(chrono::DateTime<FixedOffset>, BTreeSet<T>)>,
+    since: Option<chrono::DateTime<FixedOffset>>,
+    ids: BTreeSet<T>,
     accumulated: BTreeMap<T, std::time::Duration>,
 }
 
@@ -71,27 +72,51 @@ impl<T: Ord> Default for TrackedMultiTime<T> {
     fn default() -> Self {
         TrackedMultiTime {
             since: None,
+            ids: BTreeSet::new(),
             accumulated: BTreeMap::new(),
         }
     }
 }
 
-impl<T: Ord> TrackedMultiTime<T> {
+impl<T: Ord + Copy> TrackedMultiTime<T> {
     pub fn set_tracked(&mut self, time: chrono::DateTime<FixedOffset>, ids: BTreeSet<T>) {
-        if let Some((start, past_ids)) = self.since.take() {
-            let per_id_time = (time - start).to_std().unwrap_or(std::time::Duration::ZERO)
-                / (past_ids.len() as u32);
+        let paused = self.pause(time);
 
-            for past_id in past_ids {
-                self.accumulated
-                    .entry(past_id)
-                    .and_modify(|d| *d += per_id_time)
-                    .or_insert(per_id_time);
-            }
+        self.ids = ids;
+
+        if paused {
+            self.resume(time);
         }
+    }
 
-        if !ids.is_empty() {
-            self.since = Some((time, ids));
+    pub fn pause(&mut self, time: chrono::DateTime<FixedOffset>) -> bool {
+        if let Some(start) = self.since.take() {
+            // Accumulate time
+            if !self.ids.is_empty() {
+                let per_id_time = (time - start).to_std().unwrap_or(std::time::Duration::ZERO)
+                    / (self.ids.len() as u32);
+
+                for &past_id in &self.ids {
+                    self.accumulated
+                        .entry(past_id)
+                        .and_modify(|d| *d += per_id_time)
+                        .or_insert(per_id_time);
+                }
+            }
+
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn resume(&mut self, time: chrono::DateTime<FixedOffset>) -> bool {
+        if self.since.is_none() {
+            self.since = Some(time);
+
+            true
+        } else {
+            false
         }
     }
 }
@@ -147,25 +172,21 @@ impl EventLog {
             Event::ClockIn { clock, time } => match clock {
                 ClockType::Day => {
                     self.current_state.working.start_at(*time);
-
-                    if self.current_state.active_until.is_none()
-                        && !self.current_state.on_break.active()
-                        && !self.current_state.on_lunch.active()
-                    {
-                        self.current_state.idle_work.start_at(*time);
-                    }
+                    self.current_state.tasks.resume(*time);
                 }
                 ClockType::Break => {
                     self.current_state.on_break.start_at(*time);
                     self.current_state.working.start_at(*time);
                     self.current_state.on_lunch.end_at(*time);
                     self.current_state.idle_work.end_at(*time);
+                    self.current_state.tasks.pause(*time);
                 }
                 ClockType::Lunch => {
                     self.current_state.on_lunch.start_at(*time);
                     self.current_state.working.start_at(*time);
                     self.current_state.on_break.end_at(*time);
                     self.current_state.idle_work.end_at(*time);
+                    self.current_state.tasks.pause(*time);
                 }
             },
             Event::ClockOut { clock, time } => match clock {
@@ -174,9 +195,16 @@ impl EventLog {
                     self.current_state.on_break.end_at(*time);
                     self.current_state.on_lunch.end_at(*time);
                     self.current_state.idle_work.end_at(*time);
+                    self.current_state.tasks.pause(*time);
                 }
-                ClockType::Break => self.current_state.on_break.end_at(*time),
-                ClockType::Lunch => self.current_state.on_lunch.end_at(*time),
+                ClockType::Break => {
+                    self.current_state.on_break.end_at(*time);
+                    self.current_state.tasks.resume(*time);
+                }
+                ClockType::Lunch => {
+                    self.current_state.on_lunch.end_at(*time);
+                    self.current_state.tasks.resume(*time);
+                }
             },
             Event::Active { time } => {
                 self.current_state.active_until = Some(*time);
@@ -235,9 +263,11 @@ impl EventLog {
                     time: *active_until,
                 });
                 self.current_state.active_until = None;
-            }
 
-            true
+                true
+            } else {
+                false
+            }
         } else {
             false
         }

@@ -38,6 +38,14 @@ impl AppState {
         }
     }
 
+    async fn send_tasks(&self, tasks: &[tasks::Task]) {
+        let app_handle = self.app_handle.read().await;
+
+        if let Some(app_handle) = &*app_handle {
+            app_handle.emit_all("tasks", tasks).unwrap();
+        }
+    }
+
     async fn update_notifications(
         &self,
         event_log: &timecard::EventLog,
@@ -81,7 +89,12 @@ impl AppState {
         Ok(())
     }
 
-    async fn refresh_date(&self, send: bool, renew_active: bool) -> Result<bool, Box<dyn Error>> {
+    async fn refresh_date(
+        &self,
+        send: bool,
+        renew_active: bool,
+        refresh_active: bool,
+    ) -> Result<bool, Box<dyn Error>> {
         let mut settings = self.settings.lock().await;
         let mut event_log = self.event_log.write().await;
         let current_date = Local::now().date_naive();
@@ -119,6 +132,8 @@ impl AppState {
 
         // Inject new active event
         if renew_active && injected_idle {
+            event_log.force_active();
+        } else if refresh_active {
             event_log.refresh_active().await?;
         }
 
@@ -132,7 +147,7 @@ async fn clock_in(
     state: tauri::State<'_, Arc<AppState>>,
 ) -> Result<(), String> {
     state
-        .refresh_date(false, true)
+        .refresh_date(false, true, false)
         .await
         .map_err(|err| err.to_string())?;
 
@@ -156,7 +171,7 @@ async fn clock_out(
     state: tauri::State<'_, Arc<AppState>>,
 ) -> Result<(), String> {
     state
-        .refresh_date(false, true)
+        .refresh_date(false, true, false)
         .await
         .map_err(|err| err.to_string())?;
 
@@ -180,7 +195,7 @@ async fn set_tasks(
     state: tauri::State<'_, Arc<AppState>>,
 ) -> Result<(), String> {
     state
-        .refresh_date(false, true)
+        .refresh_date(false, true, false)
         .await
         .map_err(|err| err.to_string())?;
 
@@ -206,14 +221,88 @@ async fn get_current_timecard(
     Ok(event_log.clone())
 }
 
+#[tauri::command]
+async fn get_recents(state: tauri::State<'_, Arc<AppState>>) -> Result<tasks::Recents, ()> {
+    Ok(state.task_manager.get_recents().await)
+}
+
+#[tauri::command]
+async fn get_tasks(
+    state: tauri::State<'_, Arc<AppState>>,
+    ids: Vec<tasks::TaskID>,
+) -> Result<Vec<tasks::Task>, ()> {
+    let mut tasks = Vec::new();
+
+    for &id in &ids {
+        if let Ok(task) = state.task_manager.load_task(id).await {
+            tasks.push(task);
+        }
+    }
+
+    Ok(tasks)
+}
+
+#[tauri::command]
+async fn put_task(
+    state: tauri::State<'_, Arc<AppState>>,
+    mut task: tasks::Task,
+    make_recent: bool,
+) -> Result<tasks::Task, String> {
+    if task.id == tasks::TASK_ID_NONE {
+        task.id = state
+            .task_manager
+            .next_task_id()
+            .await
+            .map_err(|e| e.to_string())?;
+    }
+
+    state
+        .task_manager
+        .save_task(&task)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if make_recent {
+        state
+            .task_manager
+            .make_recent(task.id, task.starred)
+            .await
+            .map_err(|e| e.to_string())?
+    }
+
+    Ok(task)
+}
+
+#[tauri::command]
+async fn archive_task(
+    state: tauri::State<'_, Arc<AppState>>,
+    id: tasks::TaskID,
+) -> Result<(), String> {
+    state.task_manager.archive(id).await.map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
+#[tauri::command]
+async fn make_task_recent(
+    state: tauri::State<'_, Arc<AppState>>,
+    task: tasks::Task,
+) -> Result<(), String> {
+    state
+        .task_manager
+        .make_recent(task.id, task.starred)
+        .await
+        .map_err(|e| e.to_string())
+}
+
 async fn background_loop(app_state: Arc<AppState>) {
     let loop_time = std::time::Duration::from_secs(60);
 
     loop {
         let start = std::time::Instant::now();
 
-        if let Err(e) = app_state.refresh_date(true, false).await {
-            println!("error updating settings: {}", e)
+        if let Err(e) = app_state.refresh_date(true, true, true).await {
+            println!("error refreshing date: {}", e)
         }
 
         if let Err(e) = update_event_log(&app_state).await {
@@ -243,6 +332,7 @@ fn main() {
 
     std::fs::create_dir_all(&app_dir).expect("could not create app directory");
     std::fs::create_dir_all(&logs_dir).expect("could not create timecard logs directory");
+    std::fs::create_dir_all(&tasks_dir).expect("could not create tasks directory");
 
     let current_date = Local::now().date_naive();
     let log_file = log_file_for_date(&logs_dir, current_date);
@@ -263,11 +353,7 @@ fn main() {
             .expect("error loading/initializing tasks");
 
     let app_state = Arc::new(AppState {
-        // data_dir,
-        // app_dir,
         logs_dir,
-        // tasks_dir,
-        // config_file,
         event_log: RwLock::new(event_log),
         settings: Mutex::new(settings),
         app_handle: RwLock::new(None),
@@ -277,7 +363,7 @@ fn main() {
 
     async_runtime::block_on(async {
         app_state
-            .refresh_date(false, false)
+            .refresh_date(false, false, false)
             .await
             .expect("error refreshing event log");
 
@@ -295,7 +381,12 @@ fn main() {
             clock_in,
             clock_out,
             set_tasks,
-            get_current_timecard
+            get_current_timecard,
+            get_recents,
+            get_tasks,
+            put_task,
+            archive_task,
+            make_task_recent,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
@@ -310,7 +401,7 @@ fn main() {
 
     wayland::listen_idle(move |idle| {
         let result = async_runtime::block_on(async {
-            let injected_idle = app_state.refresh_date(false, !idle).await?;
+            let injected_idle = app_state.refresh_date(false, !idle, false).await?;
 
             let mut event_log = app_state.event_log.write().await;
 

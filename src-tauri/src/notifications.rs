@@ -164,9 +164,13 @@ impl Notifier {
 }
 
 fn format_duration_minutes(dur: std::time::Duration) -> String {
-    let mut out = String::new();
-
     let mut minutes = dur.as_secs() / 60;
+
+    if minutes == 0 {
+        return "0m".to_owned();
+    }
+
+    let mut out = String::new();
 
     if minutes > 60 * 24 * 7 {
         out += &format!("{}w", minutes / (60 * 24 * 7));

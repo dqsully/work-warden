@@ -1,0 +1,29 @@
+.task {
+    padding: 1em 2em;
+    background-color: transparent;
+    transition: background-color .05s;
+}
+
+.task:hover {
+    background-color: #0002;
+}
+
+.task-header {
+    display: flex;
+    gap: 0.6em;
+    line-height: 2.5em;
+}
+
+.task-title {
+    flex: 1 0 0;
+    text-align: left;
+    font-size: 1.5em;
+}
+
+.task-edit-form {
+    padding: 1em 0;
+}
+
+.task.active {
+    box-shadow: 0 0 10px #535bf2;
+}

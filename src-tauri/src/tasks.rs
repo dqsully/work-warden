@@ -3,7 +3,7 @@ use std::error::Error;
 use async_std::{
     fs::File,
     io::{ReadExt, WriteExt},
-    path::{Path, PathBuf},
+    path::PathBuf,
     sync::RwLock,
 };
 use serde::{Deserialize, Serialize};
@@ -12,6 +12,7 @@ pub struct TaskManager {
     tasks_dir: PathBuf,
 
     recents: RwLock<Recents>,
+    next_id: RwLock<TaskID>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -39,9 +40,23 @@ impl TaskManager {
             }
         };
 
+        let next_id_filename = tasks_dir.join("next-id");
+
+        let next_id: TaskID = if next_id_filename.exists().await {
+            let mut file = File::open(&next_id_filename).await?;
+
+            let mut buf = Vec::new();
+            file.read_to_end(&mut buf).await?;
+
+            serde_json::from_slice(&buf)?
+        } else {
+            TaskID(1)
+        };
+
         Ok(TaskManager {
             tasks_dir,
             recents: RwLock::new(recents),
+            next_id: RwLock::new(next_id),
         })
     }
 
@@ -57,31 +72,45 @@ impl TaskManager {
     pub async fn make_recent(&self, id: TaskID, starred: bool) -> Result<(), Box<dyn Error>> {
         let mut recents = self.recents.write().await;
 
-        let recents_vec = if starred {
-            &mut recents.starred
+        recents.starred = recents
+            .starred
+            .iter()
+            .copied()
+            .filter(|&recent_id| recent_id != id)
+            .collect();
+        recents.other = recents
+            .other
+            .iter()
+            .copied()
+            .filter(|&recent_id| recent_id != id)
+            .collect();
+
+        if starred {
+            recents.starred.push(id);
         } else {
-            &mut recents.other
+            recents.other.push(id);
         };
-        let max_len = if starred { usize::MAX } else { 20 };
 
-        let mut index = None;
+        self.save_recents(&recents).await?;
 
-        for (i, recent_id) in recents_vec.iter().enumerate() {
-            if *recent_id == id {
-                index = Some(i);
-                break;
-            }
-        }
+        Ok(())
+    }
 
-        if let Some(index) = index {
-            recents_vec.remove(index);
-        }
+    pub async fn archive(&self, id: TaskID) -> Result<(), Box<dyn Error>> {
+        let mut recents = self.recents.write().await;
 
-        if recents_vec.len() >= max_len {
-            recents_vec.drain(0..(recents_vec.len() - max_len + 1));
-        }
-
-        recents_vec.push(id);
+        recents.starred = recents
+            .starred
+            .iter()
+            .copied()
+            .filter(|&recent_id| recent_id != id)
+            .collect();
+        recents.other = recents
+            .other
+            .iter()
+            .copied()
+            .filter(|&recent_id| recent_id != id)
+            .collect();
 
         self.save_recents(&recents).await?;
 
@@ -91,42 +120,64 @@ impl TaskManager {
     pub async fn get_recents(&self) -> Recents {
         self.recents.read().await.clone()
     }
-}
 
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Hash)]
-pub struct TaskID(u32);
+    pub async fn next_task_id(&self) -> Result<TaskID, Box<dyn Error>> {
+        let mut next_id = self.next_id.write().await;
 
-#[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum StoryType {
-    Feature,
-    Bug,
-    Chore,
-}
+        let id = *next_id;
+        next_id.0 += 1;
 
-#[derive(PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Task {
-    id: TaskID,
-    pub shortcut_id: Option<u32>,
-    pub title: String,
-    pub description: String,
-    pub story_type: StoryType,
-    pub starred: bool,
-}
+        let mut next_id_file = File::create(self.tasks_dir.join("next-id")).await?;
+        let json = serde_json::to_vec(&*next_id)?;
 
-impl Task {
-    pub fn id(&self) -> TaskID {
-        self.id
+        next_id_file.write_all(&json).await?;
+
+        Ok(id)
     }
 
-    pub async fn save(&self, tasks_dir: &Path) -> Result<(), Box<dyn Error>> {
-        let json = serde_json::to_vec(self)?;
+    pub async fn save_task(&self, task: &Task) -> Result<(), Box<dyn Error>> {
+        let json = serde_json::to_vec(task)?;
 
-        let filename = tasks_dir.join(format!("{}.json", self.id.0));
+        let filename = self.tasks_dir.join(format!("{}.json", task.id.0));
         let mut file = File::create(&filename).await?;
         file.write_all(&json).await?;
 
         Ok(())
     }
+
+    pub async fn load_task(&self, id: TaskID) -> Result<Task, Box<dyn Error>> {
+        let filename = self.tasks_dir.join(format!("{}.json", id.0));
+        let mut file = File::open(&filename).await?;
+
+        let mut buf = Vec::new();
+        file.read_to_end(&mut buf).await?;
+
+        let task = serde_json::from_slice(&buf)?;
+        Ok(task)
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Hash, Default)]
+pub struct TaskID(u32);
+
+pub const TASK_ID_NONE: TaskID = TaskID(0);
+
+#[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum StoryType {
+    #[default]
+    Feature,
+    Bug,
+    Chore,
+}
+
+#[derive(PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct Task {
+    pub id: TaskID,
+    pub shortcut_id: Option<u32>,
+    pub title: String,
+    pub description: String,
+    pub story_type: StoryType,
+    pub starred: bool,
 }
