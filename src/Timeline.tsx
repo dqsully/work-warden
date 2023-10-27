@@ -132,16 +132,16 @@ const Timeline = memo(function Timeline({ timecard, partial }: TimelineProps) {
 
             switch (event.type) {
                 case 'ClockIn': {
+                    if (since.work === null) {
+                        if (since.activeNotWork === null) {
+                            start('idleWork', time);
+                        } else {
+                            stop('activeNotWork', time);
+                        }
+                    }
+
                     switch (event.clock) {
                         case 'Day': {
-                            if (since.work === null) {
-                                if (since.activeNotWork === null) {
-                                    start('idleWork', time);
-                                } else {
-                                    stop('activeNotWork', time);
-                                }
-                            }
-
                             start('work', time);
                             break;
                         }
