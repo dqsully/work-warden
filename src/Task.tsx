@@ -12,6 +12,7 @@ export interface TaskProps extends Partial<TrackedTime> {
     putTask: (task: TaskType) => Promise<void>;
     archiveTask: (id: number) => Promise<void>;
     isNew?: boolean;
+    active: boolean;
 }
 
 const Task = memo(
@@ -23,6 +24,7 @@ const Task = memo(
         putTask,
         archiveTask,
         isNew,
+        active,
         since,
         divider,
         accumulated,
@@ -30,7 +32,6 @@ const Task = memo(
         const [internalEditing, setEditing] = useState(false);
         const [archiveState, setArchiveState] = useState(0);
         const editing = isNew || internalEditing;
-        const active = !!since;
 
         const inputTitleRef = useRef<HTMLInputElement>(null);
         const inputDescriptionRef = useRef<HTMLTextAreaElement>(null);
@@ -94,7 +95,7 @@ const Task = memo(
             if (stopLogToTask !== undefined && task !== undefined) {
                 stopLogToTask(task).catch(console.error);
             }
-        }, []);
+        }, [task]);
 
         const headerEms = [];
 

@@ -58,7 +58,6 @@ function TaskList({ tasksTime }: TaskListProps) {
     }, []);
 
     const stopLogToTask = useCallback(async (task: TaskType) => {
-        console.log('stop task', task);
         await api.setTasks(activeIDsCache.current.filter((id) => id !== task.id));
     }, []);
 
@@ -152,6 +151,7 @@ function TaskList({ tasksTime }: TaskListProps) {
                 putTask={putNewTask}
                 archiveTask={archiveTask}
                 isNew={true}
+                active={tasksTime.ids.includes(newTaskID)}
                 {...timeForTask(newTaskID)}
             />,
         );
@@ -183,6 +183,7 @@ function TaskList({ tasksTime }: TaskListProps) {
                 stopLogToTask={stopLogToTask}
                 putTask={putExistingTask}
                 archiveTask={archiveTask}
+                active={tasksTime.ids.includes(id)}
                 {...timeForTask(id)}
             />,
         );
@@ -206,6 +207,7 @@ function TaskList({ tasksTime }: TaskListProps) {
                 stopLogToTask={stopLogToTask}
                 putTask={putExistingTask}
                 archiveTask={archiveTask}
+                active={tasksTime.ids.includes(id)}
                 {...timeForTask(id)}
             />,
         );

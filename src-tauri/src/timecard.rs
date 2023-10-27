@@ -140,6 +140,7 @@ impl State {
         self.on_break.accumulated = std::time::Duration::ZERO;
         self.on_lunch.accumulated = std::time::Duration::ZERO;
         self.idle_work.accumulated = std::time::Duration::ZERO;
+        self.tasks.accumulated = BTreeMap::new();
     }
 }
 
